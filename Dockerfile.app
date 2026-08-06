@@ -1,9 +1,8 @@
 FROM oven/bun:1.3-slim
 WORKDIR /app
-COPY apps/app/package.json ./apps/app/package.json
 COPY package.json bun.lock ./
-RUN bun install
-COPY apps/app ./apps/app
+COPY apps ./apps
 COPY packages ./packages
-RUN bun run build
+RUN bun install
+RUN bun run build --filter=app
 CMD ["bun", "run", "start"]
