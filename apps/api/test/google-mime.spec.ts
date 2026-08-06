@@ -1,0 +1,211 @@
+import { describe, expect, it } from "bun:test";
+import {
+	decodeBase64Url,
+	type GmailPart,
+	header,
+	normaliseMessageId,
+	plainTextBody,
+	rootMessageId,
+	snippetOf,
+	stripHtml,
+	stripQuotedHistory,
+} from "../src/google/mime";
+
+const encode = (text: string): string =>
+	Buffer.from(text, "utf8")
+		.toString("base64")
+		.replace(/\+/g, "-")
+		.replace(/\//g, "_")
+		.replace(/=+$/, "");
+
+describe("header", () => {
+	const headers = [
+		{ name: "Message-ID", value: "<abc@mail.acme.com>" },
+		{ name: "subject", value: "Pricing" },
+	];
+
+	it("is case-insensitive", () => {
+		expect(header(headers, "message-id")).toBe("<abc@mail.acme.com>");
+		expect(header(headers, "SUBJECT")).toBe("Pricing");
+	});
+
+	it("returns null for an absent header", () => {
+		expect(header(headers, "cc")).toBeNull();
+		expect(header(undefined, "cc")).toBeNull();
+	});
+});
+
+describe("decodeBase64Url", () => {
+	it("decodes unpadded base64url", () => {
+		expect(decodeBase64Url(encode("Hello, world"))).toBe("Hello, world");
+	});
+
+	it("survives junk without throwing", () => {
+		expect(() => decodeBase64Url("!!!!")).not.toThrow();
+	});
+});
+
+describe("plainTextBody", () => {
+	it("prefers text/plain from a nested multipart", () => {
+		const payload: GmailPart = {
+			mimeType: "multipart/mixed",
+			parts: [
+				{
+					mimeType: "multipart/alternative",
+					parts: [
+						{ mimeType: "text/plain", body: { data: encode("The plain one") } },
+						{
+							mimeType: "text/html",
+							body: { data: encode("<p>The HTML one</p>") },
+						},
+					],
+				},
+			],
+		};
+
+		expect(plainTextBody(payload)).toBe("The plain one");
+	});
+
+	it("falls back to stripped HTML when there is no plain part", () => {
+		const payload: GmailPart = {
+			mimeType: "text/html",
+			body: { data: encode("<p>Hello</p><p>World</p>") },
+		};
+
+		expect(plainTextBody(payload)).toBe("Hello\nWorld");
+	});
+
+	it("ignores attachment parts", () => {
+		const payload: GmailPart = {
+			mimeType: "multipart/mixed",
+			parts: [
+				{
+					mimeType: "text/plain",
+					filename: "notes.txt",
+					body: { data: encode("attachment text") },
+				},
+				{ mimeType: "text/plain", body: { data: encode("body text") } },
+			],
+		};
+
+		expect(plainTextBody(payload)).toBe("body text");
+	});
+
+	it("is empty rather than undefined for an empty payload", () => {
+		expect(plainTextBody(undefined)).toBe("");
+	});
+});
+
+describe("stripHtml", () => {
+	it("drops style and script blocks entirely", () => {
+		const html = "<style>p{color:red}</style><script>x()</script><p>Real</p>";
+		expect(stripHtml(html)).toBe("Real");
+	});
+
+	it("decodes the common entities", () => {
+		expect(stripHtml("<p>Tom &amp; Jerry &lt;3</p>")).toBe("Tom & Jerry <3");
+	});
+});
+
+describe("stripQuotedHistory", () => {
+	it("cuts a Gmail-style reply at the quote", () => {
+		const body = [
+			"Sounds good — Tuesday works.",
+			"",
+			"On Tue, 5 Aug 2025 at 14:02, Jane <jane@acme.com> wrote:",
+			"> Are you free Tuesday?",
+		].join("\n");
+
+		expect(stripQuotedHistory(body)).toBe("Sounds good — Tuesday works.");
+	});
+
+	it("cuts an Outlook-style reply", () => {
+		const body = [
+			"Approved.",
+			"",
+			"-----Original Message-----",
+			"From: Jane",
+		].join("\n");
+
+		expect(stripQuotedHistory(body)).toBe("Approved.");
+	});
+
+	it("cuts a forwarded block", () => {
+		const body =
+			"See below.\n\n---------- Forwarded message ---------\nFrom: X";
+		expect(stripQuotedHistory(body)).toBe("See below.");
+	});
+
+	it("drops trailing quote lines when there is no marker", () => {
+		expect(stripQuotedHistory("Yes.\n> earlier\n> earlier still")).toBe("Yes.");
+	});
+
+	it("leaves an unquoted body alone", () => {
+		expect(stripQuotedHistory("Just a first message.")).toBe(
+			"Just a first message.",
+		);
+	});
+});
+
+describe("rootMessageId", () => {
+	it("takes the first entry of References — the thread root", () => {
+		const headers = [
+			{ name: "References", value: "<root@acme.com> <second@acme.com>" },
+			{ name: "In-Reply-To", value: "<second@acme.com>" },
+			{ name: "Message-ID", value: "<third@acme.com>" },
+		];
+
+		expect(rootMessageId(headers)).toBe("root@acme.com");
+	});
+
+	it("falls back to In-Reply-To when References is absent", () => {
+		const headers = [
+			{ name: "In-Reply-To", value: "<second@acme.com>" },
+			{ name: "Message-ID", value: "<third@acme.com>" },
+		];
+
+		expect(rootMessageId(headers)).toBe("second@acme.com");
+	});
+
+	it("uses its own id when the message starts the thread", () => {
+		expect(
+			rootMessageId([{ name: "Message-ID", value: "<first@acme.com>" }]),
+		).toBe("first@acme.com");
+	});
+
+	it("gives two mailboxes' copies of one conversation the same root", () => {
+		const repA = [
+			{ name: "References", value: "<root@acme.com>" },
+			{ name: "Message-ID", value: "<reply-a@trycomp.ai>" },
+		];
+		const repB = [
+			{ name: "References", value: "<root@acme.com> <reply-a@trycomp.ai>" },
+			{ name: "Message-ID", value: "<reply-b@trycomp.ai>" },
+		];
+
+		expect(rootMessageId(repA)).toBe(rootMessageId(repB));
+	});
+});
+
+describe("normaliseMessageId", () => {
+	it("makes bracketed and bare ids the same identity", () => {
+		expect(normaliseMessageId("<Abc@Acme.com>")).toBe(
+			normaliseMessageId("abc@acme.com"),
+		);
+	});
+});
+
+describe("snippetOf", () => {
+	it("collapses whitespace", () => {
+		expect(snippetOf("a\n\n  b")).toBe("a b");
+	});
+
+	it("truncates with an ellipsis", () => {
+		expect(snippetOf("x".repeat(300))?.length).toBe(200);
+		expect(snippetOf("x".repeat(300))?.endsWith("…")).toBe(true);
+	});
+
+	it("is null for an empty body", () => {
+		expect(snippetOf("   ")).toBeNull();
+	});
+});

@@ -1,0 +1,47 @@
+{
+	"$schema": "https://turborepo.dev/schema.json",
+	"extends": ["//"],
+	"tasks": {
+		"build": {
+			"dependsOn": ["^build"],
+			"outputs": [".eve/**", ".output/**", ".vercel/output/**"]
+		},
+		"check-types": {
+			"dependsOn": ["topo", "^build"]
+		},
+		"dev": {
+			"cache": false,
+			"persistent": true,
+			"passThroughEnv": [
+				"AGENT_BRIDGE_SECRET",
+				"AI_GATEWAY_API_KEY",
+				"BLOB_READ_WRITE_TOKEN",
+				"DATABASE_URL",
+				"GITHUB_TOKEN",
+				"PERPLEXITY_API_KEY",
+				"RAPIDAPI_KEY"
+			]
+		},
+		/**
+		 * `@crm/auth#test` is not a build dependency — it is a lock.
+		 *
+		 * Every other fixture in these suites is namespaced with `TEST_RUN_ID`,
+		 * but the workspace cannot be: it is a singleton by design, one row whose
+		 * id is the literal string `workspace`. `packages/auth`'s organization
+		 * spec deletes and recreates that row in `beforeEach`, and this app's
+		 * preamble spec reads it twice inside one assertion — once to compose the
+		 * expected "Who we are" block, once per preamble it checks against it.
+		 * Run in parallel against one Postgres, a delete landing between those
+		 * reads fails `ends each preamble with the same account of us`, and it
+		 * fails on whichever pull request happened to be unlucky.
+		 *
+		 * Turborepo has no mutex, so the dependency edge is the mutex. Everything
+		 * else still runs in parallel; only these two are ordered. The real fix is
+		 * a schema per package so nothing shares a row in the first place.
+		 */
+		"test": {
+			"dependsOn": ["topo", "^build", "@crm/auth#test"],
+			"passThroughEnv": ["DATABASE_URL"]
+		}
+	}
+}
