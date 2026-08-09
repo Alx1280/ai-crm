@@ -2,6 +2,10 @@
 FROM oven/bun:1.3-slim AS base
 WORKDIR /app
 COPY . .
+# prisma generate runs during install (postinstall of @crm/db) and loads
+# prisma.config.ts, which requires DATABASE_URL to be resolvable. It does not
+# connect, so a placeholder is fine here.
+ENV DATABASE_URL=postgresql://postgres:postgres@localhost:5432/crm
 RUN bun install --frozen-lockfile
 
 # Stage 2: Build the App application (Next.js)
@@ -21,16 +25,12 @@ ENV API_URL=$API_URL \
 RUN bun run build --filter=app
 
 # Stage 3: Runtime image for App
+# Copy the whole workspace tree: bun nests workspace symlinks per-app
+# (apps/app/node_modules/@crm/* -> ../../../../packages/*), so root node_modules
+# alone is not enough for @crm/db, @crm/auth, @crm/env and @crm/ui to resolve.
 FROM oven/bun:1.3-slim
 WORKDIR /app
-COPY --from=builder /app/apps/app/.next ./apps/app/.next
-COPY --from=builder /app/apps/app/public ./apps/app/public
-COPY --from=builder /app/apps/app/package.json ./apps/app/package.json
-COPY --from=builder /app/apps/app/next.config.ts ./apps/app/next.config.ts
-COPY --from=builder /app/node_modules ./node_modules
-COPY --from=builder /app/packages ./packages
-COPY --from=builder /app/package.json ./package.json
-COPY --from=builder /app/bun.lock ./bun.lock
+COPY --from=builder /app ./
 
 ENV NODE_ENV=production
 EXPOSE 3000
