@@ -1,0 +1,62 @@
+name: Build and Push Docker Images
+
+on:
+  push:
+    branches: [ main ]
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ghcr.io/alx1280
+
+jobs:
+  build-and-push:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Set image tag
+        id: tag
+        run: echo "sha=${GITHUB_SHA::8}" >> "$GITHUB_OUTPUT"
+      - name: Build and push API
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: Dockerfile.api
+          push: true
+          tags: |
+            ${{ env.IMAGE_NAME }}/crm-api:latest
+            ${{ env.IMAGE_NAME }}/crm-api:${{ steps.tag.outputs.sha }}
+      - name: Build and push App
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: Dockerfile.app
+          push: true
+          build-args: |
+            API_URL=http://crm-api:3001
+            APP_URL=https://ai-crm.overlandquest.com
+            NEXT_PUBLIC_API_URL=http://crm-api:3001
+            DATABASE_URL=${{ secrets.DATABASE_URL || 'postgresql://postgres:postgres@localhost:5432/crm' }}
+            BETTER_AUTH_SECRET=${{ secrets.BETTER_AUTH_SECRET || 'build-time-only-placeholder-secret-32chars' }}
+          tags: |
+            ${{ env.IMAGE_NAME }}/crm-app:latest
+            ${{ env.IMAGE_NAME }}/crm-app:${{ steps.tag.outputs.sha }}
+      - name: Build and push Agent
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: Dockerfile.agent
+          push: true
+          build-args: |
+            DATABASE_URL=${{ secrets.DATABASE_URL || 'postgresql://postgres:postgres@localhost:5432/crm' }}
+          tags: |
+            ${{ env.IMAGE_NAME }}/crm-agent:latest
+            ${{ env.IMAGE_NAME }}/crm-agent:${{ steps.tag.outputs.sha }}

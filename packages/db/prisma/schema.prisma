@@ -1,0 +1,703 @@
+
+datasource db {
+  provider = "postgresql"
+}
+
+generator client {
+  provider               = "prisma-client"
+  output                 = "../src/generated/prisma"
+  runtime                = "nodejs"
+  moduleFormat           = "esm"
+  generatedFileExtension = "ts"
+  importFileExtension    = ""
+}
+
+model User {
+  id            String    @id
+  name          String
+  email         String
+  emailVerified Boolean   @default(false)
+  image         String?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+  sessions      Session[]
+  accounts      Account[]
+
+  ownedCompanies Company[]           @relation("CompanyOwner")
+  ownedContacts  Contact[]           @relation("ContactOwner")
+  ownedDeals     Deal[]              @relation("DealOwner")
+  activities     Activity[]          @relation("ActivityAuthor")
+  mailboxSyncs   MailboxSync[]
+  factDecisions  ContactFact[]       @relation("FactDecider")
+  conversations  AgentConversation[] @relation("ConversationOwner")
+
+  members     Member[]
+  invitations Invitation[]
+
+  ssoproviders SsoProvider[]
+
+  @@unique([email])
+  @@map("user")
+}
+
+model Session {
+  id        String   @id
+  expiresAt DateTime
+  token     String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  ipAddress String?
+  userAgent String?
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  activeOrganizationId String?
+
+  @@unique([token])
+  @@index([userId])
+  @@map("session")
+}
+
+model Account {
+  id                    String    @id
+  accountId             String
+  providerId            String
+  userId                String
+  user                  User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  accessToken           String?
+  refreshToken          String?
+  idToken               String?
+  accessTokenExpiresAt  DateTime?
+  refreshTokenExpiresAt DateTime?
+  scope                 String?
+  password              String?
+  createdAt             DateTime  @default(now())
+  updatedAt             DateTime  @updatedAt
+
+  @@index([userId])
+  @@map("account")
+}
+
+model Verification {
+  id         String   @id
+  identifier String
+  value      String
+  expiresAt  DateTime
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  @@index([identifier])
+  @@map("verification")
+}
+
+model RateLimit {
+  id          String @id
+  key         String
+  count       Int
+  lastRequest BigInt
+
+  @@unique([key])
+  @@map("rateLimit")
+}
+
+enum DealStage {
+  DEMO_BOOKED
+  QUALIFIED_TO_BUY
+  UNQUALIFIED_TO_BUY
+  DECISION_MAKER_BOUGHT_IN
+  CONTRACT_SENT
+  CLOSED_WON
+  CLOSED_LOST
+}
+
+enum ActivityType {
+  NOTE
+  CALL
+  EMAIL
+  MEETING
+  TASK
+  STAGE_CHANGE
+  ENRICHMENT
+}
+
+enum EnrichmentStatus {
+  PENDING
+  RUNNING
+  COMPLETE
+  FAILED
+  SKIPPED
+}
+
+enum RecordSource {
+  MANUAL
+  IMPORT
+  EMAIL
+  CALENDAR
+}
+
+model Company {
+  id          String  @id @default(cuid())
+  name        String
+  domain      String? @unique
+  website     String?
+  description String?
+
+  logoUrl     String?
+  logoDarkUrl String?
+  iconUrl     String?
+  iconDarkUrl String?
+  iconTone    String?
+  brandColor  String?
+
+  industry    String?
+  subIndustry String?
+  city        String?
+  stateCode   String?
+  country     String?
+  countryCode String?
+
+  phone       String?
+  email       String?
+  linkedinUrl String?
+  twitterUrl  String?
+  githubUrl   String?
+  pricingUrl  String?
+  careersUrl  String?
+
+  ownerId          String?
+  owner            User?    @relation("CompanyOwner", fields: [ownerId], references: [id], onDelete: SetNull)
+  primaryContactId String?  @unique
+  primaryContact   Contact? @relation("PrimaryContact", fields: [primaryContactId], references: [id], onDelete: SetNull)
+
+  enrichmentStatus EnrichmentStatus   @default(PENDING)
+  enrichedAt       DateTime?
+  enrichmentError  String?
+  enrichment       CompanyEnrichment?
+
+  source RecordSource @default(MANUAL)
+
+  lastActivityAt DateTime?
+
+  contacts       Contact[]           @relation("CompanyContacts")
+  conversations  AgentConversation[]
+  deals          Deal[]
+  activities     Activity[]
+  emailThreads   EmailThread[]
+  calendarEvents CalendarEvent[]
+  createdAt      DateTime            @default(now())
+  updatedAt      DateTime            @updatedAt
+
+  @@index([ownerId])
+  @@index([name])
+  @@index([lastActivityAt])
+  @@map("company")
+}
+
+model CompanyEnrichment {
+  companyId String   @id
+  company   Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  source    String   @default("context.dev")
+  raw       Json
+  fetchedAt DateTime @default(now())
+
+  @@map("companyEnrichment")
+}
+
+model Contact {
+  id          String  @id @default(cuid())
+  firstName   String
+  lastName    String?
+  email       String? @unique
+  phone       String?
+  title       String?
+  linkedinUrl String?
+  twitterUrl  String?
+  githubUrl   String?
+  imageUrl    String?
+
+  socialsCheckedAt DateTime?
+
+  enrichmentStatus EnrichmentStatus @default(PENDING)
+  enrichedAt       DateTime?
+  enrichmentError  String?
+
+  brief         ContactBrief?
+  facts         ContactFact[]
+  conversations AgentConversation[]
+
+  companyId String?
+  company   Company? @relation("CompanyContacts", fields: [companyId], references: [id], onDelete: SetNull)
+  ownerId   String?
+  owner     User?    @relation("ContactOwner", fields: [ownerId], references: [id], onDelete: SetNull)
+  primaryOf Company? @relation("PrimaryContact")
+
+  source RecordSource @default(MANUAL)
+
+  lastActivityAt DateTime?
+
+  deals           DealContact[]
+  activities      Activity[]
+  emailThreads    EmailThread[]
+  calendarEvents  CalendarEvent[]
+  eventAttendance CalendarAttendee[]
+  createdAt       DateTime           @default(now())
+  updatedAt       DateTime           @updatedAt
+
+  @@index([companyId])
+  @@index([ownerId])
+  @@index([lastActivityAt])
+  @@map("contact")
+}
+
+enum FactBand {
+  VERIFIED
+  PROBABLE
+  POSSIBLE
+}
+
+enum FactStatus {
+  APPLIED
+  PROPOSED
+  DISMISSED
+  SUPERSEDED
+}
+
+model ContactFact {
+  id        String  @id @default(cuid())
+  contactId String
+  contact   Contact @relation(fields: [contactId], references: [id], onDelete: Cascade)
+
+  field String
+  value String
+
+  score Float
+  band  FactBand
+
+  evidence Json
+
+  method    String
+  sourceUrl String?
+
+  sessionId String?
+
+  status      FactStatus @default(PROPOSED)
+  decidedById String?
+  decidedBy   User?      @relation("FactDecider", fields: [decidedById], references: [id], onDelete: SetNull)
+  decidedAt   DateTime?
+
+  observedAt   DateTime  @default(now())
+  supersededAt DateTime?
+
+  @@index([contactId, field, status])
+  @@index([status, observedAt])
+  @@map("contactFact")
+}
+
+model ContactBrief {
+  contactId String  @id
+  contact   Contact @relation(fields: [contactId], references: [id], onDelete: Cascade)
+
+  narrative String
+  sections  Json
+
+  score     Float
+  sourceUrl String?
+  sessionId String?
+
+  refreshedAt DateTime @default(now())
+
+  @@map("contactBrief")
+}
+
+model AgentTask {
+  id        String  @id @default(cuid())
+  contactId String?
+  companyId String?
+
+  kind   String
+  reason String
+
+  priority Int @default(0)
+  budget   Int @default(4)
+  attempts Int @default(0)
+
+  dueAt       DateTime
+  leasedUntil DateTime?
+
+  sessionId  String?
+  startedAt  DateTime?
+  finishedAt DateTime?
+  outcome    String?
+
+  createdAt DateTime @default(now())
+
+  @@index([dueAt, leasedUntil])
+  @@index([contactId])
+  @@map("agentTask")
+}
+
+model AgentEvent {
+  id        String  @id
+  sessionId String
+  contactId String?
+  type      String
+  data      Json
+
+  emittedAt DateTime
+
+  @@index([sessionId, emittedAt])
+  @@index([contactId, emittedAt])
+  @@map("agentEvent")
+}
+
+model AgentConversation {
+  id String @id @default(cuid())
+
+  contactId String?
+  contact   Contact? @relation(fields: [contactId], references: [id], onDelete: Cascade)
+  companyId String?
+  company   Company? @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  dealId    String?
+  deal      Deal?    @relation(fields: [dealId], references: [id], onDelete: Cascade)
+
+  userId String
+  user   User   @relation("ConversationOwner", fields: [userId], references: [id], onDelete: Cascade)
+
+  sessionId         String  @unique
+  continuationToken String?
+  streamIndex       Int     @default(0)
+
+  title        String?
+  messageCount Int     @default(0)
+
+  createdAt     DateTime @default(now())
+  lastMessageAt DateTime @default(now())
+
+  @@index([contactId, lastMessageAt])
+  @@index([companyId, lastMessageAt])
+  @@index([dealId, lastMessageAt])
+  @@map("agentConversation")
+}
+
+model Deal {
+  id            String              @id @default(cuid())
+  conversations AgentConversation[]
+  name          String
+  companyId     String
+  company       Company             @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  ownerId       String
+  owner         User                @relation("DealOwner", fields: [ownerId], references: [id])
+
+  stage             DealStage @default(DEMO_BOOKED)
+  stageChangedAt    DateTime  @default(now())
+  amount            Decimal?  @db.Decimal(14, 2)
+  currency          String    @default("USD")
+  expectedCloseDate DateTime?
+  closedAt          DateTime?
+  closedReason      String?
+
+  lastActivityAt DateTime?
+
+  contacts   DealContact[]
+  activities Activity[]
+  createdAt  DateTime      @default(now())
+  updatedAt  DateTime      @updatedAt
+
+  @@index([companyId])
+  @@index([ownerId])
+  @@index([stage])
+  @@index([expectedCloseDate])
+  @@index([lastActivityAt])
+  @@map("deal")
+}
+
+model DealContact {
+  dealId    String
+  deal      Deal    @relation(fields: [dealId], references: [id], onDelete: Cascade)
+  contactId String
+  contact   Contact @relation(fields: [contactId], references: [id], onDelete: Cascade)
+  role      String?
+
+  @@id([dealId, contactId])
+  @@index([contactId])
+  @@map("dealContact")
+}
+
+model Activity {
+  id      String       @id @default(cuid())
+  type    ActivityType
+  subject String?
+  body    String?
+
+  occurredAt  DateTime?
+  dueAt       DateTime?
+  completedAt DateTime?
+
+  companyId String?
+  company   Company? @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  contactId String?
+  contact   Contact? @relation(fields: [contactId], references: [id], onDelete: Cascade)
+  dealId    String?
+  deal      Deal?    @relation(fields: [dealId], references: [id], onDelete: Cascade)
+
+  createdById String
+  createdBy   User   @relation("ActivityAuthor", fields: [createdById], references: [id])
+  meta        Json?
+
+  emailThreadId   String?        @unique
+  emailThread     EmailThread?   @relation(fields: [emailThreadId], references: [id], onDelete: Cascade)
+  calendarEventId String?        @unique
+  calendarEvent   CalendarEvent? @relation(fields: [calendarEventId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([companyId, createdAt])
+  @@index([dealId, createdAt])
+  @@index([contactId, createdAt])
+  @@index([dueAt])
+  @@index([createdById])
+  @@map("activity")
+}
+
+enum GoogleSyncStatus {
+  IDLE
+  RUNNING
+  NEEDS_RECONNECT
+  FAILED
+}
+
+enum EmailDirection {
+  INBOUND
+  OUTBOUND
+}
+
+model MailboxSync {
+  id     String @id @default(cuid())
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  source String
+
+  status       GoogleSyncStatus @default(IDLE)
+  cursor       String?
+  lastSyncedAt DateTime?
+  lastError    String?
+  retryAfter   DateTime?
+  autoCreate   Boolean          @default(false)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([userId, source])
+  @@index([status])
+  @@map("mailboxSync")
+}
+
+model EmailThread {
+  id            String  @id @default(cuid())
+  rootMessageId String  @unique
+  subject       String?
+
+  companyId String?
+  company   Company? @relation(fields: [companyId], references: [id], onDelete: SetNull)
+  contactId String?
+  contact   Contact? @relation(fields: [contactId], references: [id], onDelete: SetNull)
+
+  firstMessageAt DateTime
+  lastMessageAt  DateTime
+  messageCount   Int      @default(0)
+
+  messages EmailMessage[]
+  activity Activity?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([companyId, lastMessageAt])
+  @@index([contactId, lastMessageAt])
+  @@map("emailThread")
+}
+
+model EmailMessage {
+  id       String      @id @default(cuid())
+  threadId String
+  thread   EmailThread @relation(fields: [threadId], references: [id], onDelete: Cascade)
+
+  rfcMessageId   String  @unique
+  syncedByUserId String?
+  gmailMessageId String?
+
+  direction  EmailDirection
+  fromEmail  String
+  fromName   String?
+  recipients Json
+  subject    String?
+  snippet    String?
+  body       String?
+  sentAt     DateTime
+
+  createdAt DateTime @default(now())
+
+  @@index([threadId, sentAt])
+  @@map("emailMessage")
+}
+
+model CalendarEvent {
+  id                String   @id @default(cuid())
+  iCalUid           String
+  originalStartTime DateTime
+  recurringEventId  String?
+
+  title          String?
+  description    String?
+  location       String?
+  conferenceUrl  String?
+  startsAt       DateTime
+  endsAt         DateTime
+  isAllDay       Boolean  @default(false)
+  status         String
+  organizerEmail String?
+
+  companyId String?
+  company   Company? @relation(fields: [companyId], references: [id], onDelete: SetNull)
+  contactId String?
+  contact   Contact? @relation(fields: [contactId], references: [id], onDelete: SetNull)
+
+  syncedByUserId String?
+  googleEventId  String?
+
+  attendees CalendarAttendee[]
+  activity  Activity?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([iCalUid, originalStartTime])
+  @@index([companyId, startsAt])
+  @@index([contactId, startsAt])
+  @@map("calendarEvent")
+}
+
+model CalendarAttendee {
+  id      String        @id @default(cuid())
+  eventId String
+  event   CalendarEvent @relation(fields: [eventId], references: [id], onDelete: Cascade)
+
+  email          String
+  name           String?
+  responseStatus String?
+  isOrganizer    Boolean  @default(false)
+  contactId      String?
+  contact        Contact? @relation(fields: [contactId], references: [id], onDelete: SetNull)
+
+  @@unique([eventId, email])
+  @@index([contactId])
+  @@map("calendarAttendee")
+}
+
+model SuppressedDomain {
+  domain    String   @id
+  reason    String?
+  createdAt DateTime @default(now())
+
+  @@map("suppressedDomain")
+}
+
+model SuppressedContact {
+  email     String   @id
+  reason    String?
+  createdAt DateTime @default(now())
+
+  @@map("suppressedContact")
+}
+
+model AppSetting {
+  id String @id
+
+  agentModelId String?
+
+  agentModelContextWindow Int?
+
+  contextDevApiKey String?
+
+  updatedAt DateTime @updatedAt
+
+  @@map("appSetting")
+}
+
+model Organization {
+  id          String       @id
+  name        String
+  slug        String
+  logo        String?
+  createdAt   DateTime
+  metadata    String?
+  website     String?
+  members     Member[]
+  invitations Invitation[]
+
+  @@unique([slug])
+  @@map("organization")
+}
+
+model WorkspaceProfile {
+  id String @id
+
+  website   String
+  narrative String
+  sections  Json
+
+  sourceUrl String?
+  sessionId String?
+
+  refreshedAt DateTime @default(now())
+
+  @@map("workspaceProfile")
+}
+
+model Member {
+  id             String       @id
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  userId         String
+  user           User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  role           String       @default("member")
+  createdAt      DateTime
+
+  @@unique([organizationId, userId])
+  @@index([organizationId])
+  @@index([userId])
+  @@map("member")
+}
+
+model Invitation {
+  id             String       @id
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  email          String
+  role           String?
+  status         String       @default("pending")
+  expiresAt      DateTime
+  createdAt      DateTime     @default(now())
+  inviterId      String
+  user           User         @relation(fields: [inviterId], references: [id], onDelete: Cascade)
+
+  @@index([organizationId])
+  @@index([email])
+  @@map("invitation")
+}
+
+model SsoProvider {
+  id             String  @id
+  issuer         String
+  oidcConfig     String?
+  samlConfig     String?
+  userId         String?
+  user           User?   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  providerId     String
+  organizationId String?
+  domain         String
+
+  @@unique([providerId])
+  @@map("ssoProvider")
+}

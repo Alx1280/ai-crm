@@ -1,0 +1,12 @@
+.git
+node_modules
+.next
+.turbo
+.eve
+.output
+dist
+src/generated
+Dockerfile*
+docker-compose.yml
+.env*
+!*.example

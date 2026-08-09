@@ -1,0 +1,42 @@
+{
+	"name": "@crm/auth",
+	"version": "0.0.0",
+	"private": true,
+	"type": "module",
+	"exports": {
+		".": "./src/index.ts",
+		"./client": "./src/client.ts",
+		"./cookies": "./src/cookies.ts",
+		"./scopes": "./src/scopes.ts",
+		"./workspace": "./src/workspace.ts"
+	},
+	"scripts": {
+		"auth:generate": "better-auth generate --config src/auth.ts --output ../db/prisma/schema.prisma --y",
+		"check-types": "tsc --noEmit",
+		"lint": "biome check .",
+		"test": "bun test",
+		"clean": "rm -rf .turbo node_modules"
+	},
+	"dependencies": {
+		"@better-auth/sso": "1.6.25",
+		"@crm/db": "workspace:*",
+		"@crm/env": "workspace:*",
+		"better-auth": "^1.6.25"
+	},
+	"peerDependencies": {
+		"react": "^19.2.0"
+	},
+	"peerDependenciesMeta": {
+		"react": {
+			"optional": true
+		}
+	},
+	"devDependencies": {
+		"@better-auth/cli": "^1.4.22",
+		"@crm/typescript-config": "workspace:*",
+		"@types/node": "^24.10.1",
+		"@types/react": "^19.2.18",
+		"react": "^19.2.8",
+		"typescript": "5.9.2"
+	}
+}
