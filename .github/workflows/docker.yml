@@ -41,9 +41,9 @@ jobs:
           file: Dockerfile.app
           push: true
           build-args: |
-            API_URL=http://crm-api:3001
+            API_URL=https://ai-crm-api.overlandquest.com
             APP_URL=https://ai-crm.overlandquest.com
-            NEXT_PUBLIC_API_URL=http://crm-api:3001
+            NEXT_PUBLIC_API_URL=https://ai-crm-api.overlandquest.com
             DATABASE_URL=${{ secrets.DATABASE_URL || 'postgresql://postgres:postgres@localhost:5432/crm' }}
             BETTER_AUTH_SECRET=${{ secrets.BETTER_AUTH_SECRET || 'build-time-only-placeholder-secret-32chars' }}
           tags: |
